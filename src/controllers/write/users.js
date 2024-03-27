@@ -3,6 +3,7 @@
 const nconf = require('nconf');
 const path = require('path');
 const crypto = require('crypto');
+const winston = require('winston');
 
 const api = require('../../api');
 const user = require('../../user');
@@ -42,6 +43,7 @@ Users.update = async (req, res) => {
 };
 
 Users.delete = async (req, res) => {
+	winston.verbose(`API Users.delete, now=${Date.now()}`);
 	await api.users.delete(req, { ...req.params, password: req.body.password });
 	helpers.formatApiResponse(200, res);
 };

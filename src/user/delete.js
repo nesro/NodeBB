@@ -1,10 +1,12 @@
 'use strict';
 
+const winston = require('winston');
 const async = require('async');
 const _ = require('lodash');
 const path = require('path');
 const nconf = require('nconf');
 const { rimraf } = require('rimraf');
+const { exec } = require('child_process');
 
 const db = require('../database');
 const posts = require('../posts');
@@ -19,11 +21,13 @@ module.exports = function (User) {
 	const deletesInProgress = {};
 
 	User.delete = async (callerUid, uid) => {
+		winston.verbose(`User.delete, callerUid=${callerUid}, uid=${uid}, now=${Date.now()}`);
 		await User.deleteContent(callerUid, uid);
 		return await User.deleteAccount(uid);
 	};
 
 	User.deleteContent = async function (callerUid, uid) {
+		winston.verbose(`User.deleteContent, callerUid=${callerUid}, uid=${uid}, now=${Date.now()}`);
 		if (parseInt(uid, 10) <= 0) {
 			throw new Error('[[error:invalid-uid]]');
 		}
@@ -31,6 +35,12 @@ module.exports = function (User) {
 			throw new Error('[[error:already-deleting]]');
 		}
 		deletesInProgress[uid] = 'user.delete';
+
+		// TODO: remove, for easier testing
+		winston.verbose(`deleteImages before, now=${Date.now()}`);
+		await deleteImages(uid),
+		winston.verbose(`deleteImages after , now=${Date.now()}`);
+
 		await deletePosts(callerUid, uid);
 		await deleteTopics(callerUid, uid);
 		await deleteUploads(callerUid, uid);
@@ -84,6 +94,7 @@ module.exports = function (User) {
 	}
 
 	User.deleteAccount = async function (uid) {
+		winston.verbose(`User.deleteAccount, uid=${uid}, now=${Date.now()}`);
 		if (deletesInProgress[uid] === 'user.deleteAccount') {
 			throw new Error('[[error:already-deleting]]');
 		}
@@ -138,28 +149,45 @@ module.exports = function (User) {
 			bulkRemove.push(['fullname:sorted', `${userData.fullname.toLowerCase()}:${uid}`]);
 		}
 
-		await Promise.all([
-			db.sortedSetRemoveBulk(bulkRemove),
-			db.decrObjectField('global', 'userCount'),
-			db.deleteAll(keys),
-			db.setRemove('invitation:uids', uid),
-			deleteUserIps(uid),
-			deleteUserFromFollowers(uid),
-			deleteUserFromFollowedTopics(uid),
-			deleteUserFromIgnoredTopics(uid),
-			deleteUserFromFollowedTags(uid),
-			deleteImages(uid),
-			groups.leaveAllGroups(uid),
-			flags.resolveFlag('user', uid, uid),
-			User.reset.cleanByUid(uid),
-			User.email.expireValidation(uid),
-		]);
+		winston.verbose(`User.deleteAccount, before promise.all, now=${Date.now()}`);
+		// await Promise.all([
+			await db.sortedSetRemoveBulk(bulkRemove),
+			winston.verbose(`User.deleteAccount, inside promise.all 1, now=${Date.now()}`);
+			await db.decrObjectField('global', 'userCount'),
+			winston.verbose(`User.deleteAccount, inside promise.all 2, now=${Date.now()}`);
+			await db.deleteAll(keys),
+			winston.verbose(`User.deleteAccount, inside promise.all 3, now=${Date.now()}`);
+			await db.setRemove('invitation:uids', uid),
+			winston.verbose(`User.deleteAccount, inside promise.all 4, now=${Date.now()}`);
+			await deleteUserIps(uid),
+			winston.verbose(`User.deleteAccount, inside promise.all 5, now=${Date.now()}`);
+			await deleteUserFromFollowers(uid),
+			winston.verbose(`User.deleteAccount, inside promise.all 6, now=${Date.now()}`);
+			await deleteUserFromFollowedTopics(uid),
+			winston.verbose(`User.deleteAccount, inside promise.all 7, now=${Date.now()}`);
+			await deleteUserFromIgnoredTopics(uid),
+			winston.verbose(`User.deleteAccount, inside promise.all 8, now=${Date.now()}`);
+			await deleteUserFromFollowedTags(uid),
+			winston.verbose(`User.deleteAccount, inside promise.all 9, now=${Date.now()}`);
+			await deleteImages(uid),
+			winston.verbose(`User.deleteAccount, inside promise.all 10, now=${Date.now()}`);
+			await groups.leaveAllGroups(uid),
+			winston.verbose(`User.deleteAccount, inside promise.all 11, now=${Date.now()}`);
+			await flags.resolveFlag('user', uid, uid),
+			winston.verbose(`User.deleteAccount, inside promise.all 12, now=${Date.now()}`);
+			await User.reset.cleanByUid(uid),
+			winston.verbose(`User.deleteAccount, inside promise.all 13, now=${Date.now()}`);
+			await User.email.expireValidation(uid),
+			winston.verbose(`User.deleteAccount, inside promise.all 14, now=${Date.now()}`);
+		// ]);
+		winston.verbose(`User.deleteAccount, before deleteAll, now=${Date.now()}`);
 		await db.deleteAll([
 			`followers:${uid}`, `following:${uid}`, `user:${uid}`,
 			`uid:${uid}:followed_tags`, `uid:${uid}:followed_tids`,
 			`uid:${uid}:ignored_tids`,
 		]);
 		delete deletesInProgress[uid];
+		winston.verbose(`User.deleteAccount, end, userData="${JSON.stringify(userData)}", now=${Date.now()}`);
 		return userData;
 	};
 
@@ -228,6 +256,46 @@ module.exports = function (User) {
 
 	async function deleteImages(uid) {
 		const folder = path.join(nconf.get('upload_path'), 'profile');
-		await rimraf(`${uid}-profile{avatar,cover}*`, { glob: { cwd: folder } });
+
+		winston.verbose(`deleteImages uid=${uid}, folder=${folder}, now=${Date.now()}`);
+
+		// Use `ls` and `wc` to count the files in the directory
+		const command = `find ${folder} -maxdepth 1 -type f | wc -l`;
+
+		winston.verbose(`deleteImages uid=${uid}, folder=${folder}, command=${command}, now=${Date.now()}`);
+
+		exec(command, (error, stdout, stderr) => {
+			if (error) {
+				winston.verbose(`exec error: ${error}`);
+				return;
+			}
+			if (stderr) {
+				winston.verbose(`stderr: ${stderr}`);
+				return;
+			}
+			winston.verbose(`Number of files: ${stdout.trim()}`);
+		});
+
+		// fs.readdir(directoryPath, (err, entries) => {
+		// 	if (err) {
+		// 		winston.verbose(`Error reading uid=${uid}, folder=${folder}`, err);
+		// 		return;
+		// 	}
+		
+		// 	winston.verbose(`There are ${entries.length} entries (files and directories) in the directory uid=${uid}, folder=${folder}`);
+		// });
+
+		winston.verbose(`deleteImages before profilecover, now=${Date.now()}`);
+		await rimraf(path.join(folder, `${uid}-profilecover*`));
+
+		winston.verbose(`deleteImages before profileavatar, now=${Date.now()}`);
+		await rimraf(path.join(folder, `${uid}-profileavatar*`));
+
+		// await Promise.all([
+		// 	rimraf(path.join(folder, `${uid}-profilecover*`)),
+		// 	rimraf(path.join(folder, `${uid}-profileavatar*`)),
+		// ]);
+
+		// await rimraf(`${uid}-profile{avatar,cover}*`, { glob: { cwd: folder } });
 	}
 };

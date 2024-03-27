@@ -513,6 +513,7 @@ async function isPrivilegedOrSelfAndPasswordMatch(caller, data) {
 }
 
 async function processDeletion({ uid, method, password, caller }) {
+	winston.verbose(`processDeletion, uid=${uid}, method=${method}, now=${Date.now()}`);
 	const isTargetAdmin = await user.isAdministrator(uid);
 	const isSelf = parseInt(uid, 10) === parseInt(caller.uid, 10);
 	const hasAdminPrivilege = await privileges.admin.can('admin:users', caller.uid);
@@ -541,6 +542,8 @@ async function processDeletion({ uid, method, password, caller }) {
 
 	await flags.resolveFlag('user', uid, caller.uid);
 
+
+	winston.verbose(`processDeletion, will call user method, now=${Date.now()}`);
 	let userData;
 	if (method === 'deleteAccount') {
 		userData = await user[method](uid);
@@ -548,6 +551,8 @@ async function processDeletion({ uid, method, password, caller }) {
 		userData = await user[method](caller.uid, uid);
 	}
 	userData = userData || {};
+
+	winston.verbose(`processDeletion, method finished, now=${Date.now()}`);
 
 	sockets.server.sockets.emit('event:user_status_change', { uid: caller.uid, status: 'offline' });
 

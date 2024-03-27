@@ -34,7 +34,7 @@ function setupWinston() {
 	}
 
 	winston.configure({
-		level: nconf.get('log-level') || (process.env.NODE_ENV === 'production' ? 'info' : 'verbose'),
+		level: 'debug',
 		format: winston.format.combine.apply(null, formats),
 		transports: [
 			new winston.transports.Console({
